@@ -154,18 +154,18 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     }
     
     // Create managed object contexts
-    self.writerObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
-    [self.writerObjectContext setPersistentStoreCoordinator:persistentStoreCoordinator];
-    if (self.writerObjectContext == nil) {
-        
-        // App is useless if a writer managed object context cannot be created
-        ALog(@"ERROR: NSManagedObjectContext is nil");
-        
-        return NO;
-    }
+//    self.writerObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+//    [self.writerObjectContext setPersistentStoreCoordinator:persistentStoreCoordinator];
+//    if (self.writerObjectContext == nil) {
+//        
+//        // App is useless if a writer managed object context cannot be created
+//        ALog(@"ERROR: NSManagedObjectContext is nil");
+//        
+//        return NO;
+//    }
     
     self.managedObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
-    [self.managedObjectContext setParentContext:self.writerObjectContext];
+    [self.managedObjectContext setPersistentStoreCoordinator:persistentStoreCoordinator];
     if (self.managedObjectContext == nil) {
         
         // App is useless if a managed object context cannot be created
