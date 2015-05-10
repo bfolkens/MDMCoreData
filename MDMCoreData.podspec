@@ -29,6 +29,12 @@ Pod::Spec.new do |s|
     ss.requires_arc = true
   end
 
+  s.subspec 'MDMMigrationManager' do |ss|
+    ss.source_files = 'Classes/MDMMigrationManager/MDMMigrationManager.{h,m}'
+    ss.dependency 'MDMCoreData/MDMCoreDataCore'
+    ss.requires_arc = true
+  end
+
   s.subspec 'MDMFetchedResultsTableDataSource' do |ss|
     ss.ios.deployment_target = '6.0'
     ss.ios.source_files = 'Classes/MDMFetchedResultsTableDataSource/MDMFetchedResultsTableDataSource.{h,m}'

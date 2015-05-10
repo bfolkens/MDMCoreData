@@ -31,6 +31,8 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
 
 @property (nonatomic, strong, readwrite) NSManagedObjectContext *managedObjectContext;
 @property (nonatomic, strong) NSManagedObjectContext *writerObjectContext;
+@property (nonatomic, strong) NSManagedObjectModel *writerObjectModel;
+@property (nonatomic, assign) id <MDMMigrationManagerDelegate>migrationDelegate;
 @property (nonatomic, copy) NSString *storeType;
 @property (nonatomic, strong) NSURL *storeURL;
 @property (nonatomic, strong) NSManagedObjectModel *model;
@@ -46,9 +48,6 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
         _storeType = NSSQLiteStoreType;
         _storeURL = storeURL;
         _model = model;
-        if ([self setupPersistenceStack] == NO) {
-            return nil;
-        }
     }
     
     return self;
@@ -60,9 +59,6 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     if (self) {
         _storeType = NSInMemoryStoreType;
         _model = model;
-        if ([self setupPersistenceStack] == NO) {
-            return nil;
-        }
     }
     
     return self;
@@ -70,18 +66,18 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
 
 - (instancetype)initWithStoreURL:(NSURL *)storeURL modelURL:(NSURL *)modelURL {
     
-    NSManagedObjectModel *model = [[NSManagedObjectModel alloc] initWithContentsOfURL:modelURL];
-    ZAssert(model, @"ERROR: NSManagedObjectModel is nil");
+    self.model = [[NSManagedObjectModel alloc] initWithContentsOfURL:modelURL];
+    ZAssert(self.model, @"ERROR: NSManagedObjectModel is nil");
     
-    return [self initWithStoreURL:storeURL model:model];
+    return [self initWithStoreURL:storeURL model:self.model];
 }
 
 - (instancetype)initInMemoryTypeWithModelURL:(NSURL *)modelURL {
     
-    NSManagedObjectModel *model = [[NSManagedObjectModel alloc] initWithContentsOfURL:modelURL];
-    ZAssert(model, @"ERROR: NSManagedObjectModel is nil");
+    self.model = [[NSManagedObjectModel alloc] initWithContentsOfURL:modelURL];
+    ZAssert(self.model, @"ERROR: NSManagedObjectModel is nil");
     
-    return [self initInMemoryTypeWithModel:model];
+    return [self initInMemoryTypeWithModel:self.model];
 }
 
 - (instancetype)init {
@@ -104,10 +100,25 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     ZAssert(persistentStoreCoordinator, @"ERROR: NSPersistentStoreCoordinator is nil");
     
     // Add persistent store to store coordinator
-    NSDictionary *persistentStoreOptions = @{ // Light migration
-                                             NSInferMappingModelAutomaticallyOption:@YES,
-                                             NSMigratePersistentStoresAutomaticallyOption:@YES
-                                             };
+    NSDictionary *persistentStoreOptions = nil;
+    if ([self isMigrationNeeded]) {
+        persistentStoreOptions = @{
+                                   NSInferMappingModelAutomaticallyOption: @YES,
+                                   NSSQLitePragmasOption: @{@"journal_mode": @"DELETE"}
+                                   };
+        
+        NSError *migrationError;
+        [self migrate:&migrationError];
+        if (migrationError != nil) {
+            ALog(@"ERROR: Migration failed: %@", [migrationError localizedDescription]);
+        }
+    } else {
+        persistentStoreOptions = @{
+                                   NSInferMappingModelAutomaticallyOption: @YES,
+                                   NSSQLitePragmasOption: @{@"journal_mode": @"WAL"}
+                                   };
+    }
+
     NSError *persistentStoreError;
     NSPersistentStore *persistentStore = [persistentStoreCoordinator addPersistentStoreWithType:storeType
                                                                                   configuration:nil
@@ -145,7 +156,60 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     return persistentStoreCoordinator;
 }
 
-- (BOOL)setupPersistenceStack {
+- (BOOL)isMigrationNeeded
+{
+    NSError *error = nil;
+    
+    // Check if we need to migrate
+    NSDictionary *sourceMetadata = [self sourceMetadata:&error];
+    BOOL isMigrationNeeded = NO;
+    
+    if (sourceMetadata != nil) {
+        NSManagedObjectModel *destinationModel = [self managedObjectModel];
+        // Migration is needed if destinationModel is NOT compatible
+        isMigrationNeeded = ![destinationModel isConfiguration:nil
+                                   compatibleWithStoreMetadata:sourceMetadata];
+    }
+
+    return isMigrationNeeded;
+}
+
+- (BOOL)migrate:(NSError * __autoreleasing *)error
+{
+    // Enable migrations to run even while user exits app
+    __block UIBackgroundTaskIdentifier bgTask;
+    bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithExpirationHandler:^{
+        [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+        bgTask = UIBackgroundTaskInvalid;
+    }];
+    
+    MDMMigrationManager *migrationManager = [MDMMigrationManager new];
+    migrationManager.delegate = self.migrationDelegate;
+    
+    BOOL OK = [migrationManager progressivelyMigrateURL:self.storeURL
+                                                 ofType:self.storeType
+                                                toModel:self.managedObjectModel
+                                                  error:error];
+    if (OK) {
+        NSLog(@"migration complete");
+    }
+    
+    // Mark it as invalid
+    [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+    bgTask = UIBackgroundTaskInvalid;
+    return OK;
+}
+
+- (NSDictionary *)sourceMetadata:(NSError **)error
+{
+    return [NSPersistentStoreCoordinator metadataForPersistentStoreOfType:self.storeType
+                                                                      URL:self.storeURL
+                                                                    error:error];
+}
+
+- (BOOL)setupPersistenceStackWithMigrationDelegate:(id<MDMMigrationManagerDelegate>)delegate {
+
+    self.migrationDelegate = delegate;
 
     // Setup persistent store coordinator
     NSPersistentStoreCoordinator *persistentStoreCoordinator = [self setupNewPersistentStoreCoordinatorWithStoreType:self.storeType];
