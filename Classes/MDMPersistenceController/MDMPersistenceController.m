@@ -87,6 +87,23 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     return nil;
 }
 
+- (void)setupNewPersistentStoreCoordinatorWithStoreType:(NSString *)storeType withMigrationCompletion:(void (^)(NSPersistentStoreCoordinator *))complete
+{
+    if ([self isMigrationNeeded]) {
+        [self asyncMigrate:^(BOOL success, NSError *migrationError) {
+            if (migrationError != nil) {
+                ALog(@"ERROR: Migration failed: %@", [migrationError localizedDescription]);
+            }
+            
+            NSPersistentStoreCoordinator *persistenceController = [self setupNewPersistentStoreCoordinatorWithStoreType:storeType];
+            complete(persistenceController);
+        }];
+    } else {
+        NSPersistentStoreCoordinator *persistenceController = [self setupNewPersistentStoreCoordinatorWithStoreType:storeType];
+        complete(persistenceController);
+    }
+}
+
 - (NSPersistentStoreCoordinator *)setupNewPersistentStoreCoordinatorWithStoreType:(NSString *)storeType {
     
     if (self.model == nil) {
@@ -100,24 +117,10 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     ZAssert(persistentStoreCoordinator, @"ERROR: NSPersistentStoreCoordinator is nil");
     
     // Add persistent store to store coordinator
-    NSDictionary *persistentStoreOptions = nil;
-    if ([self isMigrationNeeded]) {
-        persistentStoreOptions = @{
-                                   NSInferMappingModelAutomaticallyOption: @YES,
-                                   NSSQLitePragmasOption: @{@"journal_mode": @"DELETE"}
-                                   };
-        
-        NSError *migrationError;
-        [self migrate:&migrationError];
-        if (migrationError != nil) {
-            ALog(@"ERROR: Migration failed: %@", [migrationError localizedDescription]);
-        }
-    } else {
-        persistentStoreOptions = @{
-                                   NSInferMappingModelAutomaticallyOption: @YES,
-                                   NSSQLitePragmasOption: @{@"journal_mode": @"WAL"}
-                                   };
-    }
+    NSDictionary *persistentStoreOptions = @{
+                                             NSInferMappingModelAutomaticallyOption: @YES,
+                                             NSSQLitePragmasOption: @{@"journal_mode": @"WAL"}
+                                             };
 
     NSError *persistentStoreError;
     NSPersistentStore *persistentStore = [persistentStoreCoordinator addPersistentStoreWithType:storeType
@@ -162,16 +165,29 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     
     // Check if we need to migrate
     NSDictionary *sourceMetadata = [self sourceMetadata:&error];
-    BOOL isMigrationNeeded = NO;
-    
-    if (sourceMetadata != nil) {
-        NSManagedObjectModel *destinationModel = [self managedObjectModel];
-        // Migration is needed if destinationModel is NOT compatible
-        isMigrationNeeded = ![destinationModel isConfiguration:nil
-                                   compatibleWithStoreMetadata:sourceMetadata];
+    if (error) {
+        ALog(@"cannot determine source metadata: %@", [error localizedDescription]);
     }
-
+    
+    BOOL isMigrationNeeded = NO;
+    if (sourceMetadata != nil) {
+        NSAssert(self.model != nil, @"Destination model is nil");
+        
+        // Migration is needed if destinationModel is NOT compatible
+        isMigrationNeeded = ![self.model isConfiguration:nil
+                                          compatibleWithStoreMetadata:sourceMetadata];
+    }
+    
     return isMigrationNeeded;
+}
+
+- (void)asyncMigrate:(void (^)(BOOL, NSError *))complete
+{
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        NSError *blockError = nil;
+        BOOL success = [self migrate:&blockError];
+        complete(success, blockError);
+    });
 }
 
 - (BOOL)migrate:(NSError * __autoreleasing *)error
@@ -188,7 +204,7 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     
     BOOL OK = [migrationManager progressivelyMigrateURL:self.storeURL
                                                  ofType:self.storeType
-                                                toModel:self.managedObjectModel
+                                                toModel:self.model
                                                   error:error];
     if (OK) {
         NSLog(@"migration complete");
@@ -207,41 +223,42 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
                                                                     error:error];
 }
 
-- (BOOL)setupPersistenceStackWithMigrationDelegate:(id<MDMMigrationManagerDelegate>)delegate {
-
+- (void)setupPersistenceStackWithMigrationDelegate:(id<MDMMigrationManagerDelegate>)delegate completion:(void (^)(BOOL))complete
+{
     self.migrationDelegate = delegate;
 
     // Setup persistent store coordinator
-    NSPersistentStoreCoordinator *persistentStoreCoordinator = [self setupNewPersistentStoreCoordinatorWithStoreType:self.storeType];
-    if (persistentStoreCoordinator == nil) {
-        return NO;
-    }
-    
-    // Create managed object contexts
-//    self.writerObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
-//    [self.writerObjectContext setPersistentStoreCoordinator:persistentStoreCoordinator];
-//    if (self.writerObjectContext == nil) {
-//        
-//        // App is useless if a writer managed object context cannot be created
-//        ALog(@"ERROR: NSManagedObjectContext is nil");
-//        
-//        return NO;
-//    }
-    
-    self.managedObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
-    [self.managedObjectContext setPersistentStoreCoordinator:persistentStoreCoordinator];
-    if (self.managedObjectContext == nil) {
+    [self setupNewPersistentStoreCoordinatorWithStoreType:self.storeType withMigrationCompletion:^(NSPersistentStoreCoordinator *persistentStoreCoordinator) {
+        if (persistentStoreCoordinator == nil) {
+            complete(NO);
+        }
         
-        // App is useless if a managed object context cannot be created
-        ALog(@"ERROR: NSManagedObjectContext is nil");
+        // Create managed object contexts
+//        self.writerObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+//        [self.writerObjectContext setPersistentStoreCoordinator:persistentStoreCoordinator];
+//        if (self.writerObjectContext == nil) {
+//
+//            // App is useless if a writer managed object context cannot be created
+//            ALog(@"ERROR: NSManagedObjectContext is nil");
+//
+//            complete(NO);
+//        }
         
-        return NO;
-    }
-    
-    // Context is fully initialized, notify view controllers
-    [self persistenceStackInitialized];
-    
-    return YES;
+        self.managedObjectContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSMainQueueConcurrencyType];
+        [self.managedObjectContext setPersistentStoreCoordinator:persistentStoreCoordinator];
+        if (self.managedObjectContext == nil) {
+            
+            // App is useless if a managed object context cannot be created
+            ALog(@"ERROR: NSManagedObjectContext is nil");
+            
+            complete(NO);
+        }
+        
+        // Context is fully initialized, notify view controllers
+        [self persistenceStackInitialized];
+        
+        complete(YES);
+    }];
 }
 
 - (BOOL)removeSQLiteFilesAtStoreURL:(NSURL *)storeURL error:(NSError * __autoreleasing *)error {

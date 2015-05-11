@@ -46,7 +46,6 @@ extern NSString *const MDMIndependentManagedObjectContextDidSaveNotification;
  The persistence controller's main managed object context. (read-only)
  */
 @property (nonatomic, strong, readonly) NSManagedObjectContext *managedObjectContext;
-@property (nonatomic, strong, readonly) NSManagedObjectModel *managedObjectModel;
 
 /**
  Returns a SQLite backed persistence controller initialized with the given arguments.
@@ -111,10 +110,9 @@ extern NSString *const MDMIndependentManagedObjectContextDidSaveNotification;
  Returns a true/false flag if the persistence stack was created ok.
 
  @param delegate A delegation object for migration callbacks.
-
- @return A boolean value indicating if the persistence stack was created successfully.
+ @param completion A block that is called upon successful migration and initialization
  */
-- (BOOL)setupPersistenceStackWithMigrationDelegate:(id <MDMMigrationManagerDelegate>)delegate;
+- (void)setupPersistenceStackWithMigrationDelegate:(id<MDMMigrationManagerDelegate>)delegate completion:(void (^)(BOOL))complete;
 
 /**
  Returns a new independent managed object context with a concurrency type of `NSPrivateQueueConcurrencyType` using the

@@ -80,7 +80,7 @@
     return [self progressivelyMigrateURL:sourceStoreURL
                                   ofType:type
                                  toModel:finalModel
-                                   error:nil];
+                                   error:error];
 }
 
 - (NSArray *)modelPaths
@@ -140,11 +140,11 @@
     }
     //We have tested every model, if nil here we failed
     if (!mapping) {
-        if (NULL != error) {
-            *error = [NSError errorWithDomain:@"com.msearcher.camfind"
-                                         code:8001
-                                     userInfo:@{ NSLocalizedDescriptionKey : @"No mapping model found in bundle" }];
-        }
+//        if (NULL != error) {
+//            *error = [NSError errorWithDomain:@"com.msearcher.camfind"
+//                                         code:8001
+//                                     userInfo:@{ NSLocalizedDescriptionKey : @"No mapping model found in bundle" }];
+//        }
         return NO;
     } else {
         *destinationModel = model;
