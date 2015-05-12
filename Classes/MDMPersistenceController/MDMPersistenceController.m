@@ -165,9 +165,6 @@ NSString *const MDMIndependentManagedObjectContextDidSaveNotification = @"MDMInd
     
     // Check if we need to migrate
     NSDictionary *sourceMetadata = [self sourceMetadata:&error];
-    if (error) {
-        ALog(@"cannot determine source metadata: %@", [error localizedDescription]);
-    }
     
     BOOL isMigrationNeeded = NO;
     if (sourceMetadata != nil) {
