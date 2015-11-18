@@ -27,8 +27,6 @@
 @interface MDMFetchedResultsTableDataSource ()
 
 @property (nonatomic, weak) UITableView *tableView;
-@property (nonatomic, strong) NSMutableIndexSet *sectionsBeingAdded;
-@property (nonatomic, strong) NSMutableIndexSet *sectionsBeingRemoved;
 
 @end
 
@@ -179,9 +177,6 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
 }
 
 - (void)controllerWillChangeContent:(NSFetchedResultsController *)controller {
-    
-    self.sectionsBeingAdded = [NSMutableIndexSet indexSet];
-    self.sectionsBeingRemoved = [NSMutableIndexSet indexSet];
     [self.tableView beginUpdates];
 }
 
@@ -192,14 +187,12 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
    
     switch (type) {
         case NSFetchedResultsChangeInsert:
-            [self.sectionsBeingAdded addIndex:sectionIndex];
             [self.tableView insertSections:[NSIndexSet indexSetWithIndex:sectionIndex]
                           withRowAnimation:UITableViewRowAnimationAutomatic];
             
             break;
 
         case NSFetchedResultsChangeDelete:
-            [self.sectionsBeingRemoved addIndex:sectionIndex];
             [self.tableView deleteSections:[NSIndexSet indexSetWithIndex:sectionIndex]
                           withRowAnimation:UITableViewRowAnimationAutomatic];
             
@@ -240,30 +233,19 @@ forRowAtIndexPath:(NSIndexPath *)indexPath {
             break;
 
         case NSFetchedResultsChangeMove:
-            if ([self shouldMakeMoveForMovedObjectFromIndexPath:indexPath toIndexPath:newIndexPath]) {
-                [self.tableView moveRowAtIndexPath:indexPath toIndexPath:newIndexPath];
-            } else {
-                // This is to prevent a bug in UITableView from occurring.
-                // The bug presents itself when moving a row from a newly deleted section or to a newly inserted section
-                // This code should be removed once the bug has been fixed, it is tracked in OpenRadar
-                // http://openradar.appspot.com/17684030
-                [self.tableView deleteRowsAtIndexPaths:@[indexPath]
-                                      withRowAnimation:UITableViewRowAnimationFade];
-                [self.tableView insertRowsAtIndexPaths:@[newIndexPath]
-                                      withRowAnimation:UITableViewRowAnimationAutomatic];
-            }
-            
+            // It's currently not possible to perform a move and reload inside the same tableview update block (http://www.hitmaroc.net/1166896-9192-how-reload-programmatically-moved-row.html).
+            // The workaround is to delete then insert the row.
+            [self.tableView deleteRowsAtIndexPaths:@[indexPath]
+                                  withRowAnimation:UITableViewRowAnimationFade];
+            [self.tableView insertRowsAtIndexPaths:@[newIndexPath]
+                                  withRowAnimation:UITableViewRowAnimationAutomatic];
+
             break;
         default:
             ALog(@"Missing NSFechedResultsChange case");
 
             break;
     }
-}
-
-- (BOOL)shouldMakeMoveForMovedObjectFromIndexPath:(NSIndexPath *)fromIndexPath toIndexPath:(NSIndexPath *)toIndexPath {
-    
-    return !([self.sectionsBeingRemoved containsIndex:fromIndexPath.section] || [self.sectionsBeingAdded containsIndex:toIndexPath.section]);
 }
 
 @end
